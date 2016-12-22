@@ -558,6 +558,69 @@ namespace SolutionPackager
             Package.IsEnabled = true;
         }
 
+        private async void UnpackageFromDisc_OnClick(object sender, RoutedEventArgs e)
+        {
+            bool packageIsEnabled = Package.IsEnabled;
+            SolutionToPackage.IsEnabled = false;
+            LockMessage.Content = "Working...";
+            LockOverlay.Visibility = Visibility.Visible;
+
+            OpenFileDialog crmSolutionPathDialog = new OpenFileDialog() { Filter = "Zip files|*.zip" };
+
+            if (crmSolutionPathDialog.ShowDialog() == DialogResult.OK)
+            {
+                string unmanagedPath = crmSolutionPathDialog.FileName;
+                if (!File.Exists(unmanagedPath) || Path.GetFileNameWithoutExtension(unmanagedPath).EndsWith("_managed"))
+                {
+                    LockOverlay.Visibility = Visibility.Hidden;
+                    return;
+                }
+
+                string tempPathUnmanaged = Path.Combine(Path.GetTempPath(), crmSolutionPathDialog.SafeFileName);
+                if (File.Exists(tempPathUnmanaged))
+                    File.Delete(tempPathUnmanaged);
+                File.Copy(unmanagedPath, tempPathUnmanaged);
+
+                string managedPath = Path.Combine(Path.GetDirectoryName(unmanagedPath),
+                        Path.GetFileNameWithoutExtension(unmanagedPath) + "_managed" + Path.GetExtension(unmanagedPath));
+                string tempPathManaged = null;
+                bool extractManaged = false;
+
+                if (File.Exists(managedPath) && DownloadManaged.IsChecked == true)
+                {
+                    tempPathManaged = Path.Combine(Path.GetTempPath(), Path.GetFileNameWithoutExtension(crmSolutionPathDialog.SafeFileName) + "_managed" + Path.GetExtension(crmSolutionPathDialog.SafeFileName));
+
+                    if (File.Exists(tempPathManaged))
+                        File.Delete(tempPathManaged);
+                    File.Copy(managedPath, tempPathManaged);
+
+                    extractManaged = true;
+                }
+
+                _logger.WriteToOutputWindow("Process Unmanaged Solution from disk '" + unmanagedPath + "'", Logger.MessageType.Info);
+                if (extractManaged)
+                    _logger.WriteToOutputWindow("Process additional Managed Solution '" + managedPath + "'", Logger.MessageType.Info);
+
+                _dte.StatusBar.Text = "Extracting solution...";
+                _dte.StatusBar.Animate(true, vsStatusAnimation.vsStatusAnimationSync);
+
+                CrmSolution selectedSolution = (CrmSolution)SolutionToPackage.SelectedItem;
+                Project project = ConnPane.SelectedProject;
+                await Task.Run(() => ExtractPackage(tempPathUnmanaged, tempPathManaged, selectedSolution, project, extractManaged));
+
+                _dte.StatusBar.Clear();
+                _dte.StatusBar.Animate(false, vsStatusAnimation.vsStatusAnimationSync);
+
+                LockOverlay.Visibility = Visibility.Hidden;
+                Package.IsEnabled = packageIsEnabled;
+            }
+            else
+            {
+                LockOverlay.Visibility = Visibility.Hidden;
+                return;
+            }
+        }
+
         private async Task<bool> ExtractPackage(string unmanagedPath, string managedPath, CrmSolution selectedSolution, Project project, bool? downloadManaged)
         {
             //https://msdn.microsoft.com/en-us/library/jj602987.aspx#arguments
